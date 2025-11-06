@@ -97,6 +97,31 @@ Each time period can have the following attributes:
 - Daily/weekly/monthly summaries
 - Time distribution visualizations
 
+#### 3.3.4 Timeline View
+- **Fullscreen horizontal timeline** displaying all time periods as colored segments
+- Visual representation of continuous time tracking
+- **Infinite horizontal scrolling** to navigate through all historical data
+- Color-coded segments based on period theme
+- Segment width proportional to period duration
+- Visual features:
+  - Each period appears as a colored horizontal bar segment
+  - Segment colors match the theme colors
+  - Pause periods shown with distinct visual styling
+  - Current/active period clearly indicated
+  - Time markers and labels for orientation
+- Interaction features:
+  - Click on any segment to view period details
+  - Smooth scrolling navigation
+  - Zoom controls to adjust timeline scale (optional)
+  - Quick navigation to current period/today
+  - Tooltips on hover showing period name and duration
+
+**Use Cases**:
+- Visual overview of how time was spent throughout the day/week
+- Identify patterns in work/break cycles
+- Quick visual assessment of time distribution
+- Navigate to specific periods for editing
+
 ### 3.4 Data Management
 
 #### 3.4.1 Storage
@@ -134,6 +159,7 @@ Each time period can have the following attributes:
 ### 4.1 Layout
 - Clean, minimal design focused on current period
 - Easy access to history without cluttering main view
+- Fullscreen timeline view option for visual time analysis
 - Responsive design for desktop and mobile
 
 ### 4.2 Visual Design

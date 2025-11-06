@@ -347,6 +347,16 @@ App
 │   │   └── Charts
 │   │       ├── TimeDistributionChart
 │   │       └── TrendChart
+│   ├── TimelineView (fullscreen mode)
+│   │   ├── TimelineCanvas
+│   │   ├── TimelineScrollContainer
+│   │   ├── TimelineSegment (multiple, virtualized)
+│   │   ├── TimeMarkers
+│   │   ├── TimelineControls
+│   │   │   ├── ZoomControls (optional)
+│   │   │   └── NavigationControls
+│   │   ├── SegmentTooltip
+│   │   └── PeriodDetailPanel (side panel)
 │   └── SettingsView
 │       ├── ThemeManager
 │       ├── CategoryManager
@@ -377,6 +387,29 @@ App
 - Format: HH:MM:SS for < 24 hours
 - Format: "X days HH:MM:SS" for > 24 hours
 - Smooth updates (no flashing)
+
+**TimelineView**:
+- Fullscreen horizontal timeline visualization
+- Infinite horizontal scrolling through all periods
+- Color-coded segments representing time periods
+- Segment width proportional to period duration
+- Visual features:
+  - Horizontal bar with colored segments for each period
+  - Time axis with markers (hours, days, weeks depending on zoom level)
+  - Current/active period highlighted with special indicator
+  - Pause periods shown with distinct styling (e.g., striped pattern)
+  - Smooth transitions when scrolling
+- Interaction:
+  - Click segment to view/edit period details in side panel
+  - Hover shows tooltip with period name and duration
+  - Drag to scroll or use mouse wheel
+  - "Jump to Now" button to navigate to current period
+  - Optional zoom controls to adjust time scale
+- Performance:
+  - Virtual rendering for efficient display of thousands of periods
+  - Only render visible segments + buffer
+  - Lazy load period data as user scrolls
+  - Smooth 60fps scrolling performance
 
 ## 5. Implementation Details
 
@@ -603,6 +636,155 @@ async function initializeApp() {
 - Cache computed values (totals, summaries)
 - Invalidate cache only when underlying data changes
 
+### 5.6 Timeline View Implementation
+
+**Core Concept**:
+The timeline view renders all time periods as a continuous horizontal bar with colored segments, allowing infinite scrolling through historical data.
+
+**Implementation Approach**:
+```typescript
+interface TimelineConfig {
+  pixelsPerHour: number;        // Base scale: pixels per hour
+  zoomLevel: number;             // 1.0 = default, 2.0 = 2x zoomed in
+  viewportWidth: number;         // Visible width in pixels
+  bufferWidth: number;           // Extra rendering buffer (2x viewport)
+}
+
+class TimelineRenderer {
+  private config: TimelineConfig;
+  private scrollPosition: number;  // Current scroll offset (timestamp)
+
+  // Convert timestamp to pixel position
+  timestampToPixel(timestamp: number): number {
+    const hours = timestamp / (1000 * 60 * 60);
+    return hours * this.config.pixelsPerHour * this.config.zoomLevel;
+  }
+
+  // Convert pixel position to timestamp
+  pixelToTimestamp(pixel: number): number {
+    const hours = pixel / (this.config.pixelsPerHour * this.config.zoomLevel);
+    return hours * 1000 * 60 * 60;
+  }
+
+  // Get visible time range based on scroll position
+  getVisibleTimeRange(): { start: number; end: number } {
+    const startTime = this.scrollPosition;
+    const viewportHours = this.config.viewportWidth /
+                          (this.config.pixelsPerHour * this.config.zoomLevel);
+    const endTime = startTime + (viewportHours * 60 * 60 * 1000);
+
+    return { start: startTime, end: endTime };
+  }
+
+  // Load periods visible in current viewport + buffer
+  async loadVisiblePeriods(): Promise<TimePeriod[]> {
+    const { start, end } = this.getVisibleTimeRange();
+    const bufferTime = this.pixelToTimestamp(this.config.bufferWidth);
+
+    return await periodManager.getPeriods({
+      startTime: start - bufferTime,
+      endTime: end + bufferTime
+    });
+  }
+
+  // Render segments for visible periods
+  renderSegments(periods: TimePeriod[]): SegmentElement[] {
+    return periods.map(period => {
+      const startX = this.timestampToPixel(period.startTime);
+      const endX = period.endTime
+        ? this.timestampToPixel(period.endTime)
+        : this.timestampToPixel(Date.now());
+      const width = endX - startX;
+
+      return {
+        period,
+        x: startX,
+        width,
+        color: getThemeColor(period.theme),
+        isPaused: period.isPaused
+      };
+    });
+  }
+}
+```
+
+**Infinite Scrolling Strategy**:
+- Timeline conceptually extends infinitely in both directions
+- Actual rendering window: viewport + 2x viewport buffer on each side
+- As user scrolls, dynamically load periods entering the buffer zone
+- Unload periods that have scrolled out of buffer to save memory
+
+**Virtual Rendering**:
+```typescript
+class VirtualTimeline {
+  private visibleSegments: Map<string, SegmentElement>;
+
+  updateVisibleSegments(scrollPosition: number) {
+    const range = this.getVisibleTimeRange(scrollPosition);
+
+    // Remove segments outside buffer
+    for (const [id, segment] of this.visibleSegments) {
+      if (segment.period.endTime < range.start - bufferTime ||
+          segment.period.startTime > range.end + bufferTime) {
+        this.visibleSegments.delete(id);
+        this.removeSegmentFromDOM(id);
+      }
+    }
+
+    // Add segments entering buffer
+    const newPeriods = await this.loadPeriodsInRange(range);
+    for (const period of newPeriods) {
+      if (!this.visibleSegments.has(period.id)) {
+        this.visibleSegments.set(period.id, this.createSegment(period));
+      }
+    }
+  }
+}
+```
+
+**Time Markers**:
+- Generate time markers dynamically based on zoom level
+- Zoom level 1: Show hour markers
+- Zoom level 0.5: Show 2-hour or 4-hour markers
+- Zoom level 2+: Show 30-minute or 15-minute markers
+- Show date boundaries (midnight) with special styling
+
+**Performance Considerations**:
+- Use CSS transforms for smooth scrolling (translate3d for GPU acceleration)
+- Debounce scroll events for period loading (load after 100ms idle)
+- RequestAnimationFrame for smooth rendering
+- Canvas-based rendering for timelines with 1000+ periods (alternative to DOM)
+- IndexedDB queries optimized with time-range indexes
+
+**Interaction Handling**:
+```typescript
+// Click detection on segments
+function handleTimelineClick(clickX: number, clickY: number) {
+  const timestamp = pixelToTimestamp(clickX + scrollPosition);
+  const period = findPeriodAtTime(timestamp);
+
+  if (period) {
+    showPeriodDetail(period);
+  }
+}
+
+// Navigation to current period
+function jumpToNow() {
+  const now = Date.now();
+  const targetX = timestampToPixel(now);
+  smoothScrollTo(targetX - viewportWidth / 2); // Center current time
+}
+
+// Zoom controls
+function setZoomLevel(zoom: number) {
+  const centerTime = getCurrentCenterTime();
+  config.zoomLevel = zoom;
+  // Recalculate scroll to keep center time in center
+  const newCenterX = timestampToPixel(centerTime);
+  scrollTo(newCenterX - viewportWidth / 2);
+}
+```
+
 ## 6. CSV Export Format
 
 ```csv
@@ -738,9 +920,10 @@ npm run preview
 - Notes and tags
 - Metadata editing
 
-### Phase 3: Analytics (Week 4)
+### Phase 3: Analytics & Visualization (Week 4)
 - Summary calculations
 - Basic charts
+- Timeline view with infinite horizontal scrolling
 - CSV export functionality
 
 ### Phase 4: Polish (Week 5)
