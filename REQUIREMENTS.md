@@ -67,18 +67,8 @@ Each time period can have the following attributes:
 
 ### 3.2 Keyboard Shortcuts
 
-#### 3.2.1 Primary Shortcuts
 - **Space**: End current period and start new period
 - **Alt+Space**: Pause/Resume (toggle between working and paused states)
-- **E**: Quick edit current period
-- **N**: Add/edit notes for current period
-- **T**: Add/edit tags for current period
-
-#### 3.2.2 Optional Shortcuts (Future Enhancement)
-- **Arrow keys**: Navigate between periods in history
-- **Enter**: Save edits
-- **Escape**: Cancel edits
-- **Ctrl/Cmd + F**: Search/filter periods
 
 ### 3.3 Data Display
 

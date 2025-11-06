@@ -128,9 +128,6 @@ interface Settings {
 interface KeyboardShortcuts {
   endPeriod: string;             // Default: 'Space'
   pauseResume: string;           // Default: 'Alt+Space'
-  quickEdit: string;             // Default: 'e'
-  editNotes: string;             // Default: 'n'
-  editTags: string;              // Default: 't'
 }
 
 interface DisplaySettings {
@@ -701,7 +698,7 @@ try {
 - Period transitions work correctly
 - Pause/resume preserves work context
 - Data persists across page reloads
-- Keyboard shortcuts function as expected (Space, Alt+Space, etc.)
+- Keyboard shortcuts function as expected (Space, Alt+Space)
 
 ## 9. Deployment
 
