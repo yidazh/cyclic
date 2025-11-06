@@ -28,7 +28,27 @@ A 100% client-side web application for tracking daily time usage with continuous
 - Previous period is saved with end time
 - New period begins with same timestamp as previous period's end time
 
-#### 3.1.2 Period Metadata
+#### 3.1.2 Pause/Resume Functionality
+- **Pause Action**: Press Alt+Space to pause current activity and start a pause period
+- **Resume Action**: Press Alt+Space again to end pause and resume work
+- When pausing:
+  - Current period ends with current timestamp
+  - New "pause period" begins immediately (marked with special "Pause" theme)
+  - System remembers the metadata of the period before pause
+- When resuming:
+  - Pause period ends with current timestamp
+  - New period begins with the same metadata (theme, category, name, tags, notes) as the period before the pause
+  - User can immediately continue where they left off
+- Visual indicator shows when app is in "paused" state
+- Pause periods are tracked and visible in history for accurate time accounting
+
+**Use Cases**:
+- Taking a break without losing context of current work
+- Lunch breaks, coffee breaks, meetings
+- Quick interruptions while maintaining work context
+- Separating productive time from non-productive time
+
+#### 3.1.3 Period Metadata
 Each time period can have the following attributes:
 - **Theme**: Visual/categorical grouping (e.g., "Work", "Personal", "Health")
 - **Category**: Sub-classification within theme (e.g., "Development", "Meetings", "Exercise")
@@ -37,8 +57,9 @@ Each time period can have the following attributes:
 - **Tags**: Multiple tags for flexible filtering and organization
 - **Start Time**: Automatically captured (immutable after creation)
 - **End Time**: Automatically captured when period ends (null for active period)
+- **Resume From Period ID**: Reference to previous period (used when resuming from pause)
 
-#### 3.1.3 Editing Periods
+#### 3.1.4 Editing Periods
 - Edit metadata for any completed period
 - Edit metadata for current active period
 - Cannot edit timestamps (maintains continuous tracking integrity)
@@ -48,6 +69,7 @@ Each time period can have the following attributes:
 
 #### 3.2.1 Primary Shortcuts
 - **Space**: End current period and start new period
+- **Alt+Space**: Pause/Resume (toggle between working and paused states)
 - **E**: Quick edit current period
 - **N**: Add/edit notes for current period
 - **T**: Add/edit tags for current period
@@ -66,6 +88,8 @@ Each time period can have the following attributes:
   - Theme/Category (if set)
   - Name (if set)
   - Visual indicator (color coding by theme)
+  - Pause state indicator (when in pause mode)
+  - "Resume" hint showing what will be resumed when pause ends
 
 #### 3.3.2 History View
 - Chronological list of completed periods

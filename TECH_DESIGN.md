@@ -50,6 +50,7 @@
 ┌─────────────────▼───────────────────────┐
 │         State Management Layer          │
 │  - Active Period State                  │
+│  - Pause State (isPaused, resumeData)   │
 │  - Period History State                 │
 │  - Configuration State                  │
 │  - UI State                             │
@@ -86,6 +87,8 @@ interface TimePeriod {
   name: string;                  // Period name/description
   notes: string;                 // Free-form notes
   tags: string[];                // Array of tag strings
+  isPaused: boolean;             // True if this is a pause period
+  resumeFromPeriodId: string | null; // Reference to period to resume from (for pauses)
   createdAt: number;             // Unix timestamp (ms)
   updatedAt: number;             // Unix timestamp (ms)
 }
@@ -124,6 +127,7 @@ interface Settings {
 
 interface KeyboardShortcuts {
   endPeriod: string;             // Default: 'Space'
+  pauseResume: string;           // Default: 'Alt+Space'
   quickEdit: string;             // Default: 'e'
   editNotes: string;             // Default: 'n'
   editTags: string;              // Default: 't'
@@ -158,6 +162,8 @@ interface DefaultValues {
 //   - 'theme' (unique: false)
 //   - 'category' (unique: false)
 //   - 'tags' (unique: false, multiEntry: true)
+//   - 'isPaused' (unique: false)
+//   - 'resumeFromPeriodId' (unique: false)
 
 // 2. 'config' - stores application configuration
 // Key path: 'key'
@@ -185,8 +191,14 @@ class PeriodManager {
   // End current period and start new one
   async transitionPeriod(): Promise<TimePeriod>;
 
+  // Pause/Resume toggle
+  async pauseResume(): Promise<TimePeriod>;
+
   // Get currently active period
   async getActivePeriod(): Promise<TimePeriod | null>;
+
+  // Check if currently paused
+  async isPaused(): Promise<boolean>;
 
   // Update period metadata (not timestamps)
   async updatePeriod(id: string, updates: Partial<TimePeriod>): Promise<TimePeriod>;
@@ -327,13 +339,17 @@ App
 ├── MainView
 │   ├── CurrentPeriodView
 │   │   ├── TimerDisplay
+│   │   ├── PauseIndicator (conditional)
+│   │   ├── ResumePreview (conditional, shown when paused)
 │   │   ├── PeriodMetadata
 │   │   │   ├── ThemeSelector
 │   │   │   ├── CategorySelector
 │   │   │   ├── NameInput
 │   │   │   ├── NotesEditor
 │   │   │   └── TagsInput
-│   │   └── ActionButton (End Period)
+│   │   └── ActionButtons
+│   │       ├── EndPeriodButton
+│   │       └── PauseResumeButton
 │   ├── HistoryView
 │   │   ├── FilterBar
 │   │   └── PeriodList
@@ -358,6 +374,8 @@ App
 - Large timer display (HH:MM:SS format)
 - Real-time updates every second
 - Color-coded by theme
+- Pause state indicator (when paused)
+- Resume preview (shows what will be resumed)
 - Editable metadata fields
 - Keyboard shortcut hints
 
@@ -414,8 +432,19 @@ class KeyboardShortcutHandler {
 
   private normalizeKey(e: KeyboardEvent): string {
     // Handle special keys, modifiers, etc.
-    if (e.key === ' ') return 'Space';
-    return e.key.toLowerCase();
+    const modifiers = [];
+    if (e.altKey) modifiers.push('Alt');
+    if (e.ctrlKey) modifiers.push('Ctrl');
+    if (e.metaKey) modifiers.push('Meta');
+    if (e.shiftKey) modifiers.push('Shift');
+
+    const key = e.key === ' ' ? 'Space' : e.key;
+
+    if (modifiers.length > 0) {
+      return `${modifiers.join('+')}+${key}`;
+    }
+
+    return key.toLowerCase();
   }
 }
 ```
@@ -459,7 +488,80 @@ async function transitionPeriod(): Promise<TimePeriod> {
 }
 ```
 
-### 5.3 Data Persistence Strategy
+### 5.3 Pause/Resume Logic
+
+```typescript
+async function pauseResume(): Promise<TimePeriod> {
+  const now = Date.now();
+
+  // 1. Get current active period
+  const activePeriod = await periodManager.getActivePeriod();
+
+  if (!activePeriod) {
+    throw new Error('No active period found');
+  }
+
+  // 2. Check if currently paused
+  const isPausedNow = activePeriod.isPaused;
+
+  // 3. End current period
+  activePeriod.endTime = now;
+  await storageService.put('periods', activePeriod);
+
+  let newPeriod: TimePeriod;
+
+  if (isPausedNow) {
+    // RESUMING from pause
+    // Get the period we were working on before pause
+    const resumeFromPeriod = activePeriod.resumeFromPeriodId
+      ? await storageService.get<TimePeriod>('periods', activePeriod.resumeFromPeriodId)
+      : null;
+
+    // Create new period with metadata from pre-pause period
+    newPeriod = {
+      id: generateUUID(),
+      startTime: now,
+      endTime: null,
+      theme: resumeFromPeriod?.theme || settings.defaults.themeId,
+      category: resumeFromPeriod?.category || settings.defaults.categoryId,
+      name: resumeFromPeriod?.name || '',
+      notes: resumeFromPeriod?.notes || '',
+      tags: resumeFromPeriod?.tags || [],
+      isPaused: false,
+      resumeFromPeriodId: null,
+      createdAt: now,
+      updatedAt: now
+    };
+  } else {
+    // PAUSING
+    // Create pause period, remembering current period for resume
+    newPeriod = {
+      id: generateUUID(),
+      startTime: now,
+      endTime: null,
+      theme: 'pause', // Special pause theme
+      category: null,
+      name: 'Paused',
+      notes: '',
+      tags: [],
+      isPaused: true,
+      resumeFromPeriodId: activePeriod.id, // Remember what to resume
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  // 4. Save new period
+  await storageService.put('periods', newPeriod);
+
+  // 5. Emit event for UI update
+  eventBus.emit('pauseResumeTransition', { isPaused: newPeriod.isPaused, period: newPeriod });
+
+  return newPeriod;
+}
+```
+
+### 5.4 Data Persistence Strategy
 
 **Auto-save on every change**:
 - No manual save button needed
@@ -495,7 +597,7 @@ async function initializeApp() {
 }
 ```
 
-### 5.4 Performance Optimizations
+### 5.5 Performance Optimizations
 
 **Virtual Scrolling for History**:
 - Use react-window or similar for large period lists
@@ -533,6 +635,8 @@ async function initializeApp() {
         "name": "Feature implementation",
         "notes": "Working on time tracking app",
         "tags": ["coding", "react"],
+        "isPaused": false,
+        "resumeFromPeriodId": null,
         "createdAt": 1699180800000,
         "updatedAt": 1699180800000
       }
@@ -588,14 +692,16 @@ try {
 
 ### 8.2 Integration Tests
 - Complete period lifecycle
-- Export/import workflows
+- Pause/resume flow (preserves metadata correctly)
+- Export/import workflows (including pause periods)
 - Keyboard shortcut handling
 
 ### 8.3 E2E Tests
 - User can start tracking immediately
 - Period transitions work correctly
+- Pause/resume preserves work context
 - Data persists across page reloads
-- Keyboard shortcuts function as expected
+- Keyboard shortcuts function as expected (Space, Alt+Space, etc.)
 
 ## 9. Deployment
 
@@ -663,6 +769,7 @@ npm run preview
 ### Phase 1: MVP (Weeks 1-2)
 - Basic UI with current period display
 - Period transition with spacebar
+- Pause/resume with Alt+Space
 - IndexedDB storage
 - Simple history view
 
