@@ -61,7 +61,7 @@
 │  - Period Manager                       │
 │  - Timer Manager                        │
 │  - Analytics Engine                     │
-│  - Export/Import Service                │
+│  - CSV Export Service                   │
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
@@ -294,32 +294,22 @@ class AnalyticsEngine {
 }
 ```
 
-### 3.5 Export/Import Service
+### 3.5 CSV Export Service
 
 **Responsibilities**:
-- Export data to JSON
-- Export data to CSV
-- Import data from JSON
-- Validate imported data
-- Handle merge conflicts
+- Export period data to CSV format for spreadsheet analysis
 
 **Key Methods**:
 ```typescript
-class ExportImportService {
-  // Export all data as JSON
-  async exportJSON(): Promise<Blob>;
-
+class CSVExportService {
   // Export periods as CSV
   async exportCSV(dateRange?: DateRange): Promise<Blob>;
 
-  // Import from JSON
-  async importJSON(file: File): Promise<ImportResult>;
+  // Format period data for CSV
+  formatPeriodForCSV(period: TimePeriod): string[];
 
-  // Validate import data
-  validateImportData(data: any): ValidationResult;
-
-  // Merge imported data with existing
-  async mergeData(importedData: any, strategy: MergeStrategy): Promise<void>;
+  // Generate CSV header row
+  getCSVHeaders(): string[];
 }
 ```
 
@@ -361,7 +351,7 @@ App
 │       ├── ThemeManager
 │       ├── CategoryManager
 │       ├── ShortcutSettings
-│       └── ExportImportPanel
+│       └── ExportPanel
 └── Modal (for dialogs)
 ```
 
@@ -613,46 +603,19 @@ async function initializeApp() {
 - Cache computed values (totals, summaries)
 - Invalidate cache only when underlying data changes
 
-## 6. Data Export Formats
-
-### 6.1 JSON Export Format
-
-```json
-{
-  "version": "1.0.0",
-  "exportDate": "2025-11-05T10:30:00.000Z",
-  "data": {
-    "periods": [
-      {
-        "id": "uuid-1",
-        "startTime": 1699180800000,
-        "endTime": 1699184400000,
-        "theme": "work",
-        "category": "development",
-        "name": "Feature implementation",
-        "notes": "Working on time tracking app",
-        "tags": ["coding", "react"],
-        "isPaused": false,
-        "resumeFromPeriodId": null,
-        "createdAt": 1699180800000,
-        "updatedAt": 1699180800000
-      }
-    ],
-    "config": {
-      "themes": [...],
-      "categories": [...],
-      "settings": {...}
-    }
-  }
-}
-```
-
-### 6.2 CSV Export Format
+## 6. CSV Export Format
 
 ```csv
-Start Time,End Time,Duration (seconds),Theme,Category,Name,Notes,Tags
-2025-11-05 08:00:00,2025-11-05 09:00:00,3600,Work,Development,Feature implementation,Working on time tracking app,"coding,react"
+Start Time,End Time,Duration (seconds),Theme,Category,Name,Notes,Tags,Is Paused
+2025-11-05 08:00:00,2025-11-05 09:00:00,3600,Work,Development,Feature implementation,Working on time tracking app,"coding,react",false
+2025-11-05 12:00:00,2025-11-05 12:30:00,1800,Pause,,,Lunch break,,true
 ```
+
+**Notes**:
+- Timestamps formatted as YYYY-MM-DD HH:MM:SS for spreadsheet compatibility
+- Duration in seconds for easy calculations
+- Tags joined with commas and quoted
+- Is Paused field indicates pause periods for filtering
 
 ## 7. Error Handling
 
@@ -674,7 +637,6 @@ try {
 - If gap detected, create recovery period or prompt user
 
 ### 7.3 Data Validation
-- Validate all imported data
 - Check for overlapping periods
 - Verify timestamp integrity
 - Handle malformed data gracefully
@@ -690,7 +652,7 @@ try {
 ### 8.2 Integration Tests
 - Complete period lifecycle
 - Pause/resume flow (preserves metadata correctly)
-- Export/import workflows (including pause periods)
+- CSV export workflow (including pause periods)
 - Keyboard shortcut handling
 
 ### 8.3 E2E Tests
@@ -740,9 +702,10 @@ npm run preview
 - Avoid dangerouslySetInnerHTML / v-html
 
 ### 10.3 Data Backup
-- Encourage regular exports
+- Encourage regular CSV exports for backup
 - Provide clear export instructions
 - Warn before clearing data
+- Users can maintain their own backup copies in spreadsheet format
 
 ## 11. Future Technical Enhancements
 
@@ -778,12 +741,11 @@ npm run preview
 ### Phase 3: Analytics (Week 4)
 - Summary calculations
 - Basic charts
-- Export functionality
+- CSV export functionality
 
 ### Phase 4: Polish (Week 5)
 - Keyboard shortcuts
 - Settings panel
-- Import functionality
 - Responsive design
 - PWA support
 

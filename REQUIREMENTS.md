@@ -104,11 +104,8 @@ Each time period can have the following attributes:
 - No manual save required
 - Data persists across browser sessions
 
-#### 3.4.2 Export/Import
-- Export data as JSON
+#### 3.4.2 Export
 - Export data as CSV for spreadsheet analysis
-- Import previously exported data
-- Backup/restore functionality
 
 #### 3.4.3 Data Integrity
 - Validate no gaps in time periods
