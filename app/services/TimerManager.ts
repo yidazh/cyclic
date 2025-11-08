@@ -8,6 +8,7 @@ export class TimerManager {
   private startTime: number | null = null;
   private intervalId: number | null = null;
   private subscribers: Set<(elapsed: number) => void> = new Set();
+  private visibilityChangeHandler: (() => void) | null = null;
 
   /**
    * Start tracking active period
@@ -22,8 +23,32 @@ export class TimerManager {
       this.notifySubscribers();
     }, 1000);
 
+    // Handle visibility changes (tab switching)
+    this.setupVisibilityHandler();
+
     // Immediate update
     this.notifySubscribers();
+  }
+
+  /**
+   * Set up visibility change handler
+   * Ensures timer updates when tab becomes visible again
+   */
+  private setupVisibilityHandler(): void {
+    // Clean up existing handler
+    if (this.visibilityChangeHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
+    }
+
+    // Create new handler
+    this.visibilityChangeHandler = () => {
+      if (document.visibilityState === 'visible') {
+        // Update immediately when tab becomes visible
+        this.notifySubscribers();
+      }
+    };
+
+    document.addEventListener('visibilitychange', this.visibilityChangeHandler);
   }
 
   /**
@@ -34,6 +59,13 @@ export class TimerManager {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+
+    // Clean up visibility handler
+    if (this.visibilityChangeHandler) {
+      document.removeEventListener('visibilitychange', this.visibilityChangeHandler);
+      this.visibilityChangeHandler = null;
+    }
+
     this.startTime = null;
   }
 
@@ -63,7 +95,27 @@ export class TimerManager {
    */
   private notifySubscribers(): void {
     const elapsed = this.getElapsedTime();
-    this.subscribers.forEach(callback => callback(elapsed));
+    this.subscribers.forEach(callback => {
+      try {
+        callback(elapsed);
+      } catch (error) {
+        console.error('Error in timer subscriber:', error);
+      }
+    });
+  }
+
+  /**
+   * Check if timer is running
+   */
+  isRunning(): boolean {
+    return this.intervalId !== null;
+  }
+
+  /**
+   * Get current start time
+   */
+  getStartTime(): number | null {
+    return this.startTime;
   }
 }
 

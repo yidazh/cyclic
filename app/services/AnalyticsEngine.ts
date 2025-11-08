@@ -163,11 +163,102 @@ export class AnalyticsEngine {
   }
 
   /**
+   * Get weekly summary
+   */
+  async getWeeklySummary(date: Date): Promise<DailySummary[]> {
+    // Get start of week (Monday)
+    const startOfWeek = new Date(date);
+    const day = startOfWeek.getDay();
+    const diff = day === 0 ? -6 : 1 - day; // Adjust to Monday
+    startOfWeek.setDate(startOfWeek.getDate() + diff);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const summaries: DailySummary[] = [];
+
+    for (let i = 0; i < 7; i++) {
+      const currentDate = new Date(startOfWeek);
+      currentDate.setDate(startOfWeek.getDate() + i);
+
+      const summary = await this.getDailySummary(currentDate);
+      summaries.push(summary);
+    }
+
+    return summaries;
+  }
+
+  /**
+   * Get monthly summary
+   */
+  async getMonthlySummary(year: number, month: number): Promise<DailySummary[]> {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const summaries: DailySummary[] = [];
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(year, month, day);
+      const summary = await this.getDailySummary(date);
+      summaries.push(summary);
+    }
+
+    return summaries;
+  }
+
+  /**
+   * Get total tracked time for a date range
+   */
+  async getTotalTime(dateRange?: DateRange): Promise<number> {
+    const periods = await this.getPeriodsInRange(dateRange);
+
+    return periods.reduce((total, period) => {
+      if (period.endTime) {
+        return total + (period.endTime - period.startTime);
+      }
+      return total;
+    }, 0);
+  }
+
+  /**
+   * Get average daily time for a date range
+   */
+  async getAverageDailyTime(dateRange?: DateRange): Promise<number> {
+    if (!dateRange) {
+      return 0;
+    }
+
+    const totalTime = await this.getTotalTime(dateRange);
+    const daysDiff = Math.ceil(
+      (dateRange.end.getTime() - dateRange.start.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    return daysDiff > 0 ? totalTime / daysDiff : 0;
+  }
+
+  /**
+   * Get most active theme
+   */
+  async getMostActiveTheme(dateRange?: DateRange): Promise<string | null> {
+    const totals = await this.getTotalByTheme(dateRange);
+
+    if (totals.size === 0) return null;
+
+    let maxTheme: string | null = null;
+    let maxDuration = 0;
+
+    totals.forEach((duration, theme) => {
+      if (duration > maxDuration) {
+        maxDuration = duration;
+        maxTheme = theme;
+      }
+    });
+
+    return maxTheme;
+  }
+
+  /**
    * Get color for a key (theme/category/tag)
-   * TODO: Integrate with theme configuration
+   * TODO: Integrate with theme configuration from store
    */
   private getColorForKey(key: string): string {
-    // Placeholder colors
+    // Placeholder colors - should be loaded from config
     const colors: Record<string, string> = {
       work: '#3b82f6',
       personal: '#10b981',

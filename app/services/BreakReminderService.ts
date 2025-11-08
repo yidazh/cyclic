@@ -4,6 +4,8 @@
  */
 export class BreakReminderService {
   private timerId: number | null = null;
+  private onReminderTriggered: (() => void) | null = null;
+  private onReminderCancelled: (() => void) | null = null;
 
   /**
    * Start a break reminder
@@ -17,6 +19,11 @@ export class BreakReminderService {
     this.timerId = window.setTimeout(() => {
       this.showNotification();
       this.timerId = null; // Auto-clear after triggering
+
+      // Trigger callback
+      if (this.onReminderTriggered) {
+        this.onReminderTriggered();
+      }
     }, durationMs);
 
     console.log(`Break reminder started for ${durationMinutes} minutes`);
@@ -30,6 +37,11 @@ export class BreakReminderService {
       window.clearTimeout(this.timerId);
       this.timerId = null;
       console.log('Break reminder cancelled');
+
+      // Trigger callback
+      if (this.onReminderCancelled) {
+        this.onReminderCancelled();
+      }
     }
   }
 
@@ -79,6 +91,37 @@ export class BreakReminderService {
     }
 
     return Notification.permission;
+  }
+
+  /**
+   * Check if notifications are supported
+   */
+  isNotificationSupported(): boolean {
+    return 'Notification' in window;
+  }
+
+  /**
+   * Get current notification permission
+   */
+  getNotificationPermission(): NotificationPermission {
+    if (!('Notification' in window)) {
+      return 'denied';
+    }
+    return Notification.permission;
+  }
+
+  /**
+   * Set callback for when reminder is triggered
+   */
+  setOnReminderTriggered(callback: () => void): void {
+    this.onReminderTriggered = callback;
+  }
+
+  /**
+   * Set callback for when reminder is cancelled
+   */
+  setOnReminderCancelled(callback: () => void): void {
+    this.onReminderCancelled = callback;
   }
 }
 

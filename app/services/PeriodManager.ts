@@ -200,9 +200,23 @@ export class PeriodManager {
    * Handle edge case: recover from unexpected app closure
    */
   async recoverIncompleteSession(): Promise<void> {
-    // Implementation for crash recovery
-    // TODO: Implement recovery logic
-    console.log('Checking for incomplete sessions...');
+    try {
+      const activePeriod = await storageService.getActivePeriod();
+
+      if (!activePeriod) {
+        // No active period, check if we need to create initial period
+        const allPeriods = await storageService.getPeriods();
+
+        if (allPeriods.length === 0) {
+          console.log('No periods found, creating initial period');
+          await this.createInitialPeriod();
+        } else {
+          console.log('Active period found, no recovery needed');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to recover incomplete session:', error);
+    }
   }
 
   /**
@@ -229,6 +243,65 @@ export class PeriodManager {
     await storageService.savePeriod(period);
 
     return period;
+  }
+
+  /**
+   * Initialize period manager
+   * Creates initial period if needed
+   */
+  async initialize(): Promise<void> {
+    try {
+      // Ensure storage is initialized first
+      await storageService.init();
+
+      // Check for incomplete sessions
+      await this.recoverIncompleteSession();
+
+      console.log('Period manager initialized');
+    } catch (error) {
+      console.error('Failed to initialize period manager:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete a period by ID
+   */
+  async deletePeriod(id: string): Promise<void> {
+    const period = await storageService.getPeriod(id);
+
+    if (!period) {
+      throw new Error(`Period not found: ${id}`);
+    }
+
+    // Don't allow deleting active period
+    if (period.endTime === null) {
+      throw new Error('Cannot delete active period');
+    }
+
+    await storageService.deletePeriod(id);
+  }
+
+  /**
+   * Get period count
+   */
+  async getPeriodCount(filter?: PeriodFilter): Promise<number> {
+    const periods = await storageService.getPeriods(filter);
+    return periods.length;
+  }
+
+  /**
+   * Get total tracked time (in milliseconds)
+   */
+  async getTotalTrackedTime(filter?: PeriodFilter): Promise<number> {
+    const periods = await storageService.getPeriods(filter);
+
+    return periods.reduce((total, period) => {
+      if (period.endTime) {
+        return total + (period.endTime - period.startTime);
+      }
+      return total;
+    }, 0);
   }
 }
 
