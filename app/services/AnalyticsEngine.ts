@@ -1,4 +1,4 @@
-import { DateRange, DailySummary, ChartData, TimeDistribution } from '@/types';
+import { DateRange, DailySummary, TimeDistribution } from '@/types';
 import { storageService } from './StorageService';
 
 /**

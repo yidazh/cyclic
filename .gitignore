@@ -47,3 +47,4 @@ coverage
 # Temp
 .temp
 .cache
+app.config.timestamp_*.js
