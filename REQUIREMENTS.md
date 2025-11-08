@@ -9,7 +9,7 @@ A 100% client-side web application for tracking daily time usage with continuous
 ### 2.1 Client-Side Only
 - All data storage and processing happens in the browser
 - No server-side dependencies or API calls
-- Data persists using browser localStorage or IndexedDB
+- Data persists using SQLite Wasm (stored in browser via OPFS)
 - Fully functional offline
 
 ### 2.2 Continuous Time Tracking
@@ -141,7 +141,7 @@ Each time period can have the following attributes:
 ### 3.4 Data Management
 
 #### 3.4.1 Storage
-- Automatic save to browser localStorage/IndexedDB
+- Automatic save to SQLite database (stored in browser OPFS)
 - No manual save required
 - Data persists across browser sessions
 

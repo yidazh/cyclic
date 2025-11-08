@@ -25,11 +25,14 @@
 - Utility-first approach
 - Responsive design support
 
-**Storage**: IndexedDB (with localStorage fallback)
-- Larger storage capacity than localStorage (50MB+ vs 5-10MB)
-- Better performance for large datasets
-- Structured data storage
-- Use Dexie.js wrapper for easier API
+**Storage**: SQLite Wasm (@sqlite.org/sqlite-wasm)
+- Full SQL database running in browser via WebAssembly
+- Better performance for complex queries compared to IndexedDB
+- Familiar SQL syntax for data operations
+- ACID compliance and transactions
+- Efficient storage and indexing
+- File-based persistence using OPFS (Origin Private File System)
+- Mature ecosystem and tooling
 
 **State Management**: Context API (React) or Pinia (Vue)
 - No external dependencies needed for React Context
@@ -66,8 +69,8 @@
                   │
 ┌─────────────────▼───────────────────────┐
 │          Data Access Layer              │
-│  - IndexedDB Wrapper                    │
-│  - localStorage Fallback                │
+│  - SQLite Database (Wasm)               │
+│  - SQL Query Builder                    │
 │  - Data Validation                      │
 └─────────────────────────────────────────┘
 ```
@@ -148,32 +151,50 @@ interface ReminderSettings {
 }
 ```
 
-### 2.2 IndexedDB Schema
+### 2.2 SQLite Database Schema
 
-```typescript
-// Database name: 'TimeTrackingDB'
-// Version: 1
+```sql
+-- Database file: 'timetracking.db' (stored in OPFS)
 
-// Object Stores:
+-- 1. periods table - stores all time periods
+CREATE TABLE periods (
+  id TEXT PRIMARY KEY,
+  startTime INTEGER NOT NULL,
+  endTime INTEGER,
+  theme TEXT,
+  category TEXT,
+  name TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '',  -- JSON array stored as text
+  isPaused INTEGER NOT NULL DEFAULT 0,  -- SQLite boolean (0 or 1)
+  resumeFromPeriodId TEXT,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  FOREIGN KEY (resumeFromPeriodId) REFERENCES periods(id)
+);
 
-// 1. 'periods' - stores all time periods
-// Key path: 'id'
-// Indexes:
-//   - 'startTime' (unique: false)
-//   - 'endTime' (unique: false)
-//   - 'theme' (unique: false)
-//   - 'category' (unique: false)
-//   - 'tags' (unique: false, multiEntry: true)
-//   - 'isPaused' (unique: false)
-//   - 'resumeFromPeriodId' (unique: false)
+-- Indexes for efficient querying
+CREATE INDEX idx_periods_startTime ON periods(startTime);
+CREATE INDEX idx_periods_endTime ON periods(endTime);
+CREATE INDEX idx_periods_theme ON periods(theme);
+CREATE INDEX idx_periods_category ON periods(category);
+CREATE INDEX idx_periods_isPaused ON periods(isPaused);
+CREATE INDEX idx_periods_resumeFromPeriodId ON periods(resumeFromPeriodId);
 
-// 2. 'config' - stores application configuration
-// Key path: 'key'
-// Single document with key: 'appConfig'
+-- 2. config table - stores application configuration
+CREATE TABLE config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL  -- JSON stored as text
+);
 
-// 3. 'metadata' - stores app metadata
-// Key path: 'key'
-// Used for versioning, migration tracking
+-- 3. metadata table - stores app metadata
+CREATE TABLE metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Insert initial metadata
+INSERT INTO metadata (key, value) VALUES ('schema_version', '1');
 ```
 
 ## 3. Core Components/Modules
@@ -243,30 +264,48 @@ class TimerManager {
 ### 3.3 Storage Service
 
 **Responsibilities**:
-- Abstract storage layer (IndexedDB primary, localStorage fallback)
-- Handle CRUD operations
-- Manage transactions
-- Handle quota errors
+- Manage SQLite Wasm database connection
+- Execute SQL queries and statements
+- Handle CRUD operations for periods and configuration
+- Manage transactions for data consistency
+- Handle database initialization and schema migrations
 
 **Key Methods**:
 ```typescript
 class StorageService {
-  // Initialize database
+  private db: any; // SQLite database instance from @sqlite.org/sqlite-wasm
+
+  // Initialize SQLite database
   async init(): Promise<void>;
 
-  // Generic CRUD operations
-  async get<T>(store: string, key: string): Promise<T | undefined>;
-  async put<T>(store: string, value: T): Promise<void>;
-  async delete(store: string, key: string): Promise<void>;
-  async getAll<T>(store: string): Promise<T[]>;
+  // Execute SQL query (SELECT)
+  async query<T>(sql: string, params?: any[]): Promise<T[]>;
 
-  // Query with index
-  async queryByIndex<T>(store: string, index: string, value: any): Promise<T[]>;
+  // Execute SQL statement (INSERT, UPDATE, DELETE)
+  async execute(sql: string, params?: any[]): Promise<void>;
 
-  // Batch operations
-  async bulkPut<T>(store: string, values: T[]): Promise<void>;
+  // Get single period by ID
+  async getPeriod(id: string): Promise<TimePeriod | null>;
 
-  // Check storage quota
+  // Get all periods (with optional filtering)
+  async getPeriods(filter?: PeriodFilter): Promise<TimePeriod[]>;
+
+  // Save or update period
+  async savePeriod(period: TimePeriod): Promise<void>;
+
+  // Delete period
+  async deletePeriod(id: string): Promise<void>;
+
+  // Get configuration
+  async getConfig(key: string): Promise<any>;
+
+  // Save configuration
+  async saveConfig(key: string, value: any): Promise<void>;
+
+  // Transaction support
+  async transaction<T>(callback: () => Promise<T>): Promise<T>;
+
+  // Check storage quota (OPFS)
   async getStorageEstimate(): Promise<StorageEstimate>;
 }
 ```
@@ -530,7 +569,7 @@ async function transitionPeriod(): Promise<TimePeriod> {
   // 2. End current period
   if (activePeriod) {
     activePeriod.endTime = now;
-    await storageService.put('periods', activePeriod);
+    await storageService.savePeriod(activePeriod);
   }
 
   // 3. Create new period starting at same timestamp
@@ -548,7 +587,7 @@ async function transitionPeriod(): Promise<TimePeriod> {
   };
 
   // 4. Save new period
-  await storageService.put('periods', newPeriod);
+  await storageService.savePeriod(newPeriod);
 
   // 5. Emit event for UI update
   eventBus.emit('periodTransition', newPeriod);
@@ -575,7 +614,7 @@ async function pauseResume(): Promise<TimePeriod> {
 
   // 3. End current period
   activePeriod.endTime = now;
-  await storageService.put('periods', activePeriod);
+  await storageService.savePeriod(activePeriod);
 
   let newPeriod: TimePeriod;
 
@@ -583,7 +622,7 @@ async function pauseResume(): Promise<TimePeriod> {
     // RESUMING from pause
     // Get the period we were working on before pause
     const resumeFromPeriod = activePeriod.resumeFromPeriodId
-      ? await storageService.get<TimePeriod>('periods', activePeriod.resumeFromPeriodId)
+      ? await storageService.getPeriod(activePeriod.resumeFromPeriodId)
       : null;
 
     // Create new period with metadata from pre-pause period
@@ -621,7 +660,7 @@ async function pauseResume(): Promise<TimePeriod> {
   }
 
   // 4. Save new period
-  await storageService.put('periods', newPeriod);
+  await storageService.savePeriod(newPeriod);
 
   // 5. Emit event for UI update
   eventBus.emit('pauseResumeTransition', { isPaused: newPeriod.isPaused, period: newPeriod });
@@ -640,7 +679,7 @@ async function pauseResume(): Promise<TimePeriod> {
 **Debounce Example**:
 ```typescript
 const debouncedSave = debounce(async (period: TimePeriod) => {
-  await storageService.put('periods', period);
+  await storageService.savePeriod(period);
 }, 500); // Wait 500ms after last change before saving
 ```
 
@@ -666,7 +705,215 @@ async function initializeApp() {
 }
 ```
 
-### 5.5 Performance Optimizations
+### 5.5 SQLite Wasm Implementation
+
+**Initialization**:
+```typescript
+import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+
+class StorageService {
+  private db: any = null;
+
+  async init(): Promise<void> {
+    const sqlite3 = await sqlite3InitModule({
+      print: console.log,
+      printErr: console.error,
+    });
+
+    // Create or open database in OPFS (Origin Private File System)
+    if ('opfs' in sqlite3) {
+      this.db = new sqlite3.oo1.OpfsDb('/timetracking.db');
+      console.log('Using OPFS for persistence');
+    } else {
+      // Fallback to in-memory database (data lost on reload)
+      this.db = new sqlite3.oo1.DB();
+      console.warn('OPFS not available, using in-memory database');
+    }
+
+    // Initialize schema
+    await this.initSchema();
+  }
+
+  private async initSchema(): Promise<void> {
+    // Check if schema exists
+    const tableExists = this.db.exec({
+      sql: "SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'",
+      returnValue: 'resultRows'
+    });
+
+    if (tableExists.length === 0) {
+      // Create schema
+      const schema = `
+        CREATE TABLE periods (
+          id TEXT PRIMARY KEY,
+          startTime INTEGER NOT NULL,
+          endTime INTEGER,
+          theme TEXT,
+          category TEXT,
+          name TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          tags TEXT NOT NULL DEFAULT '',
+          isPaused INTEGER NOT NULL DEFAULT 0,
+          resumeFromPeriodId TEXT,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL,
+          FOREIGN KEY (resumeFromPeriodId) REFERENCES periods(id)
+        );
+
+        CREATE INDEX idx_periods_startTime ON periods(startTime);
+        CREATE INDEX idx_periods_endTime ON periods(endTime);
+        CREATE INDEX idx_periods_theme ON periods(theme);
+        CREATE INDEX idx_periods_category ON periods(category);
+        CREATE INDEX idx_periods_isPaused ON periods(isPaused);
+
+        CREATE TABLE config (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE metadata (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        INSERT INTO metadata (key, value) VALUES ('schema_version', '1');
+      `;
+
+      this.db.exec(schema);
+    }
+  }
+}
+```
+
+**CRUD Operations**:
+```typescript
+class StorageService {
+  async savePeriod(period: TimePeriod): Promise<void> {
+    const sql = `
+      INSERT INTO periods (
+        id, startTime, endTime, theme, category, name, notes, tags,
+        isPaused, resumeFromPeriodId, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        endTime = excluded.endTime,
+        theme = excluded.theme,
+        category = excluded.category,
+        name = excluded.name,
+        notes = excluded.notes,
+        tags = excluded.tags,
+        isPaused = excluded.isPaused,
+        resumeFromPeriodId = excluded.resumeFromPeriodId,
+        updatedAt = excluded.updatedAt
+    `;
+
+    this.db.exec({
+      sql,
+      bind: [
+        period.id,
+        period.startTime,
+        period.endTime,
+        period.theme,
+        period.category,
+        period.name,
+        period.notes,
+        JSON.stringify(period.tags),
+        period.isPaused ? 1 : 0,
+        period.resumeFromPeriodId,
+        period.createdAt,
+        period.updatedAt
+      ]
+    });
+  }
+
+  async getPeriod(id: string): Promise<TimePeriod | null> {
+    const result = this.db.exec({
+      sql: 'SELECT * FROM periods WHERE id = ?',
+      bind: [id],
+      returnValue: 'resultRows',
+      rowMode: 'object'
+    });
+
+    if (result.length === 0) return null;
+
+    return this.rowToPeriod(result[0]);
+  }
+
+  async getPeriods(filter?: PeriodFilter): Promise<TimePeriod[]> {
+    let sql = 'SELECT * FROM periods WHERE 1=1';
+    const params: any[] = [];
+
+    if (filter?.startTime) {
+      sql += ' AND startTime >= ?';
+      params.push(filter.startTime);
+    }
+
+    if (filter?.endTime) {
+      sql += ' AND endTime <= ?';
+      params.push(filter.endTime);
+    }
+
+    if (filter?.theme) {
+      sql += ' AND theme = ?';
+      params.push(filter.theme);
+    }
+
+    sql += ' ORDER BY startTime DESC';
+
+    const rows = this.db.exec({
+      sql,
+      bind: params,
+      returnValue: 'resultRows',
+      rowMode: 'object'
+    });
+
+    return rows.map(row => this.rowToPeriod(row));
+  }
+
+  private rowToPeriod(row: any): TimePeriod {
+    return {
+      id: row.id,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      theme: row.theme,
+      category: row.category,
+      name: row.name,
+      notes: row.notes,
+      tags: JSON.parse(row.tags || '[]'),
+      isPaused: row.isPaused === 1,
+      resumeFromPeriodId: row.resumeFromPeriodId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    };
+  }
+}
+```
+
+**Transactions**:
+```typescript
+async transaction<T>(callback: () => Promise<T>): Promise<T> {
+  this.db.exec('BEGIN TRANSACTION');
+
+  try {
+    const result = await callback();
+    this.db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    this.db.exec('ROLLBACK');
+    throw error;
+  }
+}
+```
+
+**Key Features**:
+- **OPFS Persistence**: Database file stored in Origin Private File System
+- **Prepared Statements**: Use parameter binding to prevent SQL injection
+- **Upsert Pattern**: INSERT ... ON CONFLICT DO UPDATE for save operations
+- **Type Conversion**: Convert SQLite rows to TypeScript objects
+- **JSON Storage**: Store arrays (tags) as JSON strings
+- **Integer Booleans**: SQLite uses 0/1 for boolean values
+- **Foreign Keys**: Maintain referential integrity for resumeFromPeriodId
+
+### 5.6 Performance Optimizations
 
 **Virtual Scrolling for History**:
 - Use react-window or similar for large period lists
@@ -674,8 +921,9 @@ async function initializeApp() {
 - Maintains performance with years of data
 
 **Indexed Queries**:
-- Leverage IndexedDB indexes for fast filtering
-- Pre-compute aggregations for analytics
+- Leverage SQLite indexes for fast filtering
+- Use SQL aggregation functions (SUM, COUNT, GROUP BY)
+- Pre-compute complex analytics when needed
 
 **Lazy Loading**:
 - Load analytics data only when Analytics view is opened
@@ -685,7 +933,7 @@ async function initializeApp() {
 - Cache computed values (totals, summaries)
 - Invalidate cache only when underlying data changes
 
-### 5.6 Timeline View Implementation
+### 5.7 Timeline View Implementation
 
 **Core Concept**:
 The timeline view renders all time periods as a continuous horizontal bar with colored segments, allowing infinite scrolling through historical data.
@@ -834,7 +1082,7 @@ function setZoomLevel(zoom: number) {
 }
 ```
 
-### 5.7 Break Reminder Implementation
+### 5.8 Break Reminder Implementation
 
 **Core Concept**:
 A simple, stateless timer that shows a browser notification after a specified duration. Independent of period tracking, with no persistence.
@@ -928,7 +1176,7 @@ async function transitionPeriod(): Promise<TimePeriod> {
   // 3. End current period
   if (activePeriod) {
     activePeriod.endTime = now;
-    await storageService.put('periods', activePeriod);
+    await storageService.savePeriod(activePeriod);
   }
 
   // 4. Create new period starting at same timestamp
@@ -948,7 +1196,7 @@ async function transitionPeriod(): Promise<TimePeriod> {
   };
 
   // 5. Save new period
-  await storageService.put('periods', newPeriod);
+  await storageService.savePeriod(newPeriod);
 
   // 6. Emit event for UI update
   eventBus.emit('periodTransition', newPeriod);
