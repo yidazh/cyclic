@@ -105,7 +105,7 @@ export class AppInitService {
    * Shows warning if user tries to close during active period
    */
   private setupBeforeUnloadHandling(): void {
-    window.addEventListener('beforeunload', (e) => {
+    window.addEventListener('beforeunload', (_e) => {
       // Check if there's an active period
       // Note: This is synchronous, so we can't use async storage calls
       // The data should already be persisted by this point
@@ -115,8 +115,8 @@ export class AppInitService {
       /*
       const activePeriod = timerManager.isRunning();
       if (activePeriod) {
-        e.preventDefault();
-        e.returnValue = '';
+        _e.preventDefault();
+        _e.returnValue = '';
       }
       */
     });
