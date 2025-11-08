@@ -58,8 +58,43 @@ Each time period can have the following attributes:
 - **Start Time**: Automatically captured (immutable after creation)
 - **End Time**: Automatically captured when period ends (null for active period)
 - **Resume From Period ID**: Reference to previous period (used when resuming from pause)
+- **Alarm Duration**: Optional timer duration for the period (e.g., 30 minutes)
+- **Alarm Status**: Whether alarm is active, triggered, dismissed, or not set
 
-#### 3.1.4 Editing Periods
+#### 3.1.4 Period Alarms/Timers
+- **Setting an Alarm**: When starting or during an active period, set a duration-based alarm
+- **Alarm Options**:
+  - Quick presets: 15 min, 30 min, 45 min, 1 hour, 2 hours
+  - Custom duration input (minutes and hours)
+  - Optional: Repeat alarm at intervals
+- **Alarm Behavior**:
+  - Timer counts down from set duration
+  - When alarm triggers:
+    - Play notification sound (configurable)
+    - Show browser notification with period name
+    - Visual alert in the app (flashing/pulsing indicator)
+    - Continue tracking the period (alarm doesn't end period automatically)
+- **Alarm Actions**:
+  - Dismiss alarm (stops sound and notification)
+  - Snooze alarm (repeat after 5/10 minutes)
+  - End period (dismiss alarm and start new period)
+- **Visual Indicators**:
+  - Show remaining time when alarm is set
+  - Progress indicator showing time until alarm
+  - Clear indication when alarm is triggered
+- **Alarm Persistence**:
+  - Alarm state saved to local storage
+  - If browser is closed and reopened, alarm state is restored
+  - If alarm time passed while app was closed, show missed alarm notification
+
+**Use Cases**:
+- Pomodoro-style work sessions (25-minute focus periods)
+- Time-boxed tasks (set 30 minutes for email processing)
+- Meeting reminders (set alarm for meeting end time)
+- Break reminders (work for 2 hours, get reminded to take a break)
+- Prevent overworking on tasks (cap task duration)
+
+#### 3.1.5 Editing Periods
 - Edit metadata for any completed period
 - Edit metadata for current active period
 - Cannot edit timestamps (maintains continuous tracking integrity)
@@ -152,6 +187,12 @@ Each time period can have the following attributes:
 - Keyboard shortcut customization
 - Display preferences (12/24 hour format, date format)
 - Default theme/category for new periods
+- Alarm/Timer preferences:
+  - Default alarm sound selection
+  - Alarm volume control
+  - Enable/disable browser notifications
+  - Snooze duration options (5, 10, 15 minutes)
+  - Default alarm presets customization
 - Auto-pause detection (optional future feature)
 
 ## 4. User Interface Requirements
