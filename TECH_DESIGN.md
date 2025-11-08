@@ -89,10 +89,6 @@ interface TimePeriod {
   tags: string[];                // Array of tag strings
   isPaused: boolean;             // True if this is a pause period
   resumeFromPeriodId: string | null; // Reference to period to resume from (for pauses)
-  alarmDuration: number | null;  // Alarm duration in milliseconds (null if no alarm)
-  alarmTriggerTime: number | null; // Unix timestamp when alarm should trigger (null if no alarm)
-  alarmStatus: 'not_set' | 'active' | 'triggered' | 'dismissed' | 'snoozed'; // Alarm state
-  alarmSnoozeUntil: number | null; // Unix timestamp for snooze end (null if not snoozed)
   createdAt: number;             // Unix timestamp (ms)
   updatedAt: number;             // Unix timestamp (ms)
 }
@@ -127,7 +123,7 @@ interface Settings {
   keyboardShortcuts: KeyboardShortcuts;
   display: DisplaySettings;
   defaults: DefaultValues;
-  alarms: AlarmSettings;
+  reminder: ReminderSettings;
 }
 
 interface KeyboardShortcuts {
@@ -147,13 +143,8 @@ interface DefaultValues {
   categoryId: string | null;     // Default category for new periods
 }
 
-interface AlarmSettings {
-  soundEnabled: boolean;         // Enable/disable alarm sounds
-  soundFile: string;             // Selected alarm sound file
-  volume: number;                // Volume level (0-100)
-  notificationsEnabled: boolean; // Enable/disable browser notifications
-  snoozeDuration: number;        // Snooze duration in minutes (default: 5)
-  defaultPresets: number[];      // Default alarm duration presets in minutes [15, 30, 45, 60, 120]
+interface ReminderSettings {
+  defaultDuration: number;       // Default reminder duration in minutes (default: 30)
 }
 ```
 
@@ -175,8 +166,6 @@ interface AlarmSettings {
 //   - 'tags' (unique: false, multiEntry: true)
 //   - 'isPaused' (unique: false)
 //   - 'resumeFromPeriodId' (unique: false)
-//   - 'alarmStatus' (unique: false)
-//   - 'alarmTriggerTime' (unique: false)
 
 // 2. 'config' - stores application configuration
 // Key path: 'key'
@@ -329,59 +318,32 @@ class CSVExportService {
 }
 ```
 
-### 3.6 Alarm Manager
+### 3.6 Break Reminder Service
 
 **Responsibilities**:
-- Manage alarms for time periods
-- Monitor and trigger alarms at scheduled times
-- Play alarm sounds and show notifications
-- Handle alarm states (active, triggered, dismissed, snoozed)
-- Persist alarm state across browser sessions
+- Manage a simple break reminder timer (independent of periods)
+- Show browser notification when timer expires
+- Auto-dismiss when period ends
 
 **Key Methods**:
 ```typescript
-class AlarmManager {
-  private audioContext: AudioContext;
-  private alarmCheckInterval: number;
+class BreakReminderService {
+  private timerId: number | null = null;
 
-  // Set alarm for a period
-  async setAlarm(periodId: string, durationMinutes: number): Promise<void>;
+  // Start a break reminder
+  startReminder(durationMinutes: number): void;
 
-  // Clear/dismiss alarm
-  async dismissAlarm(periodId: string): Promise<void>;
+  // Cancel/dismiss the reminder
+  cancelReminder(): void;
 
-  // Snooze alarm for specified duration
-  async snoozeAlarm(periodId: string, snoozeMinutes?: number): Promise<void>;
-
-  // Check if any alarms should trigger
-  async checkAlarms(): Promise<void>;
-
-  // Trigger alarm (play sound, show notification)
-  async triggerAlarm(period: TimePeriod): Promise<void>;
-
-  // Play alarm sound
-  playAlarmSound(soundFile: string, volume: number): void;
-
-  // Stop alarm sound
-  stopAlarmSound(): void;
-
-  // Request notification permission
-  async requestNotificationPermission(): Promise<NotificationPermission>;
+  // Check if reminder is active
+  isActive(): boolean;
 
   // Show browser notification
-  async showNotification(period: TimePeriod): Promise<void>;
+  showNotification(): void;
 
-  // Get active alarms
-  async getActiveAlarms(): Promise<TimePeriod[]>;
-
-  // Handle missed alarms (when app was closed)
-  async handleMissedAlarms(): Promise<void>;
-
-  // Start alarm monitoring (called on app init)
-  startMonitoring(): void;
-
-  // Stop alarm monitoring
-  stopMonitoring(): void;
+  // Request notification permission (one-time)
+  async requestNotificationPermission(): Promise<NotificationPermission>;
 }
 ```
 
@@ -400,13 +362,7 @@ App
 │   │   ├── TimerDisplay
 │   │   ├── PauseIndicator (conditional)
 │   │   ├── ResumePreview (conditional, shown when paused)
-│   │   ├── AlarmDisplay (conditional, shown when alarm is set)
-│   │   │   ├── AlarmCountdown
-│   │   │   ├── AlarmProgressBar
-│   │   │   └── AlarmControls (dismiss, snooze)
-│   │   ├── AlarmSetter
-│   │   │   ├── AlarmPresetButtons
-│   │   │   └── CustomDurationInput
+│   │   ├── BreakReminderButton (simple button to start/cancel reminder)
 │   │   ├── PeriodMetadata
 │   │   │   ├── ThemeSelector
 │   │   │   ├── CategorySelector
@@ -440,16 +396,8 @@ App
 │       ├── ThemeManager
 │       ├── CategoryManager
 │       ├── ShortcutSettings
-│       ├── AlarmSettings
-│       │   ├── SoundSelector
-│       │   ├── VolumeControl
-│       │   ├── NotificationToggle
-│       │   └── PresetManager
+│       ├── ReminderSettings (default duration input)
 │       └── ExportPanel
-├── AlarmNotificationModal (global, shown when alarm triggers)
-│   ├── AlarmMessage
-│   ├── AlarmActions (dismiss, snooze, end period)
-│   └── AlarmSound (audio player)
 └── Modal (for dialogs)
 ```
 
@@ -499,40 +447,18 @@ App
   - Lazy load period data as user scrolls
   - Smooth 60fps scrolling performance
 
-**AlarmDisplay**:
-- Shown when an alarm is set for the current period
-- Real-time countdown display (MM:SS or HH:MM:SS)
-- Circular or linear progress indicator showing time remaining
-- Visual state changes as alarm approaches (color changes at 5 min, 1 min)
-- Controls to dismiss or modify alarm
-- Prominent display but doesn't interfere with timer
+**BreakReminderButton**:
+- Simple button to start/cancel break reminder
+- Shows "Start Break Reminder" when inactive
+- Shows "Cancel Reminder" when active (with subtle indicator)
+- Uses default duration from settings
+- One-click operation
+- Automatically dismissed when period ends
 
-**AlarmSetter**:
-- Quick preset buttons (15min, 30min, 45min, 1hr, 2hr)
-- Custom duration input (hours and minutes)
-- Visual feedback when alarm is set
-- Ability to modify alarm during active period
-- Shows confirmation when alarm is successfully set
-
-**AlarmNotificationModal**:
-- Full-screen or prominent modal when alarm triggers
-- Shows period name and elapsed time
-- Flashing/pulsing visual indicator
-- Plays alarm sound (looping until dismissed)
-- Action buttons:
-  - Dismiss (stop alarm, continue period)
-  - Snooze (stop alarm, set new alarm for 5/10 min)
-  - End Period (dismiss alarm and start new period)
-- Auto-focus for keyboard accessibility
-- Cannot be easily dismissed accidentally
-
-**AlarmSettings** (in Settings View):
-- Sound selector with preview playback
-- Volume slider with real-time feedback
-- Browser notification permission toggle with status indicator
-- Snooze duration selector
-- Customize alarm preset buttons
-- Test alarm feature
+**ReminderSettings** (in Settings View):
+- Simple number input for default reminder duration (in minutes)
+- Default value: 30 minutes
+- No other settings needed (browser notification sound is default)
 
 ## 5. Implementation Details
 
@@ -908,248 +834,136 @@ function setZoomLevel(zoom: number) {
 }
 ```
 
-### 5.7 Alarm System Implementation
+### 5.7 Break Reminder Implementation
 
 **Core Concept**:
-The alarm system monitors active period alarms and triggers audio/visual notifications when time expires. It must handle browser visibility changes, app closures, and persist state.
+A simple, stateless timer that shows a browser notification after a specified duration. Independent of period tracking, with no persistence.
 
-**Setting an Alarm**:
+**Implementation**:
 ```typescript
-async function setAlarm(periodId: string, durationMinutes: number): Promise<void> {
-  const period = await periodManager.getActivePeriod();
+class BreakReminderService {
+  private timerId: number | null = null;
 
-  if (!period || period.id !== periodId) {
-    throw new Error('Can only set alarm for active period');
+  // Start a break reminder
+  startReminder(durationMinutes: number): void {
+    // Cancel any existing reminder
+    this.cancelReminder();
+
+    // Set timeout for the specified duration
+    const durationMs = durationMinutes * 60 * 1000;
+    this.timerId = window.setTimeout(() => {
+      this.showNotification();
+      this.timerId = null; // Auto-clear after triggering
+    }, durationMs);
+
+    // Emit event for UI update
+    eventBus.emit('reminderStarted', { durationMinutes });
   }
 
-  const now = Date.now();
-  const durationMs = durationMinutes * 60 * 1000;
-  const triggerTime = now + durationMs;
-
-  // Update period with alarm data
-  period.alarmDuration = durationMs;
-  period.alarmTriggerTime = triggerTime;
-  period.alarmStatus = 'active';
-  period.alarmSnoozeUntil = null;
-  period.updatedAt = now;
-
-  await storageService.put('periods', period);
-
-  // Emit event for UI update
-  eventBus.emit('alarmSet', { period, triggerTime });
-}
-```
-
-**Alarm Monitoring**:
-```typescript
-class AlarmMonitor {
-  private checkInterval: NodeJS.Timeout | null = null;
-  private audioElement: HTMLAudioElement | null = null;
-
-  start() {
-    // Check for alarms every second
-    this.checkInterval = setInterval(() => {
-      this.checkAlarms();
-    }, 1000);
-
-    // Also check on visibility change (user returns to tab)
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) {
-        this.checkAlarms();
-      }
-    });
-  }
-
-  stop() {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-      this.checkInterval = null;
+  // Cancel the reminder
+  cancelReminder(): void {
+    if (this.timerId !== null) {
+      window.clearTimeout(this.timerId);
+      this.timerId = null;
+      eventBus.emit('reminderCancelled');
     }
   }
 
-  async checkAlarms() {
-    const now = Date.now();
-    const activePeriod = await periodManager.getActivePeriod();
-
-    if (!activePeriod) return;
-
-    // Check if alarm should trigger
-    if (activePeriod.alarmStatus === 'active' &&
-        activePeriod.alarmTriggerTime &&
-        now >= activePeriod.alarmTriggerTime) {
-      await this.triggerAlarm(activePeriod);
-    }
-
-    // Check snoozed alarms
-    if (activePeriod.alarmStatus === 'snoozed' &&
-        activePeriod.alarmSnoozeUntil &&
-        now >= activePeriod.alarmSnoozeUntil) {
-      await this.triggerAlarm(activePeriod);
-    }
+  // Check if reminder is active
+  isActive(): boolean {
+    return this.timerId !== null;
   }
 
-  async triggerAlarm(period: TimePeriod) {
-    // Update alarm status
-    period.alarmStatus = 'triggered';
-    period.updatedAt = Date.now();
-    await storageService.put('periods', period);
+  // Show browser notification
+  showNotification(): void {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const notification = new Notification('Time to Take a Break!', {
+        body: 'You\'ve been working for a while. Consider taking a short break.',
+        icon: '/icon.png',
+        tag: 'break-reminder', // Replace previous notifications
+      });
 
-    // Play sound
-    const settings = await getAlarmSettings();
-    if (settings.soundEnabled) {
-      this.playSound(settings.soundFile, settings.volume);
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
     }
 
-    // Show browser notification
-    if (settings.notificationsEnabled && 'Notification' in window) {
-      if (Notification.permission === 'granted') {
-        this.showNotification(period);
-      }
+    // Emit event for UI update
+    eventBus.emit('reminderTriggered');
+  }
+
+  // Request notification permission (one-time, called on first use)
+  async requestNotificationPermission(): Promise<NotificationPermission> {
+    if (!('Notification' in window)) {
+      console.warn('Browser does not support notifications');
+      return 'denied';
     }
 
-    // Emit event to show modal
-    eventBus.emit('alarmTriggered', period);
-  }
-
-  playSound(soundFile: string, volume: number) {
-    this.audioElement = new Audio(soundFile);
-    this.audioElement.volume = volume / 100;
-    this.audioElement.loop = true;
-    this.audioElement.play().catch(err => {
-      console.error('Failed to play alarm sound:', err);
-    });
-  }
-
-  stopSound() {
-    if (this.audioElement) {
-      this.audioElement.pause();
-      this.audioElement.currentTime = 0;
-      this.audioElement = null;
+    if (Notification.permission === 'granted') {
+      return 'granted';
     }
-  }
 
-  async showNotification(period: TimePeriod) {
-    const elapsed = Date.now() - period.startTime;
-    const elapsedMinutes = Math.floor(elapsed / 60000);
+    if (Notification.permission !== 'denied') {
+      const permission = await Notification.requestPermission();
+      return permission;
+    }
 
-    const notification = new Notification('Time Tracking Alarm', {
-      body: `${period.name || 'Current period'} - ${elapsedMinutes} minutes elapsed`,
-      icon: '/icon.png',
-      badge: '/badge.png',
-      requireInteraction: true, // Keep notification visible
-      tag: `alarm-${period.id}`, // Replace previous notifications
-    });
-
-    notification.onclick = () => {
-      window.focus();
-      notification.close();
-    };
+    return Notification.permission;
   }
 }
 ```
 
-**Alarm Actions**:
+**Period Transition Logic (Auto-dismiss)**:
 ```typescript
-// Dismiss alarm
-async function dismissAlarm(periodId: string) {
-  const period = await storageService.get<TimePeriod>('periods', periodId);
-  if (!period) return;
-
-  period.alarmStatus = 'dismissed';
-  period.updatedAt = Date.now();
-  await storageService.put('periods', period);
-
-  alarmMonitor.stopSound();
-  eventBus.emit('alarmDismissed', period);
-}
-
-// Snooze alarm
-async function snoozeAlarm(periodId: string, snoozeMinutes: number = 5) {
-  const period = await storageService.get<TimePeriod>('periods', periodId);
-  if (!period) return;
-
+async function transitionPeriod(): Promise<TimePeriod> {
   const now = Date.now();
-  period.alarmStatus = 'snoozed';
-  period.alarmSnoozeUntil = now + (snoozeMinutes * 60 * 1000);
-  period.updatedAt = now;
-  await storageService.put('periods', period);
 
-  alarmMonitor.stopSound();
-  eventBus.emit('alarmSnoozed', { period, snoozeMinutes });
-}
-```
-
-**Handling Missed Alarms**:
-```typescript
-async function handleMissedAlarms() {
-  const now = Date.now();
+  // 1. Get current active period
   const activePeriod = await periodManager.getActivePeriod();
 
-  if (!activePeriod) return;
+  // 2. Cancel any active reminder when ending period
+  breakReminderService.cancelReminder();
 
-  // Check if alarm was missed while app was closed
-  if (activePeriod.alarmStatus === 'active' &&
-      activePeriod.alarmTriggerTime &&
-      activePeriod.alarmTriggerTime < now) {
-
-    // Trigger missed alarm notification
-    const missedMinutes = Math.floor((now - activePeriod.alarmTriggerTime) / 60000);
-
-    // Show missed alarm notification
-    eventBus.emit('alarmMissed', {
-      period: activePeriod,
-      missedBy: missedMinutes
-    });
-
-    // Update status
-    activePeriod.alarmStatus = 'triggered';
+  // 3. End current period
+  if (activePeriod) {
+    activePeriod.endTime = now;
     await storageService.put('periods', activePeriod);
   }
-}
 
-// Call on app initialization
-async function initializeApp() {
-  // ... existing initialization code ...
+  // 4. Create new period starting at same timestamp
+  const newPeriod: TimePeriod = {
+    id: generateUUID(),
+    startTime: now,
+    endTime: null,
+    theme: settings.defaults.themeId,
+    category: settings.defaults.categoryId,
+    name: '',
+    notes: '',
+    tags: [],
+    isPaused: false,
+    resumeFromPeriodId: null,
+    createdAt: now,
+    updatedAt: now
+  };
 
-  await handleMissedAlarms();
-  alarmMonitor.start();
-}
-```
+  // 5. Save new period
+  await storageService.put('periods', newPeriod);
 
-**Browser Notification Permission**:
-```typescript
-async function requestNotificationPermission(): Promise<NotificationPermission> {
-  if (!('Notification' in window)) {
-    console.warn('Browser does not support notifications');
-    return 'denied';
-  }
+  // 6. Emit event for UI update
+  eventBus.emit('periodTransition', newPeriod);
 
-  if (Notification.permission === 'granted') {
-    return 'granted';
-  }
-
-  if (Notification.permission !== 'denied') {
-    const permission = await Notification.requestPermission();
-    return permission;
-  }
-
-  return Notification.permission;
+  return newPeriod;
 }
 ```
 
-**Performance Considerations**:
-- Use setInterval with 1-second precision (sufficient for minute-based alarms)
-- Only one alarm check per second regardless of number of alarms
-- Audio element created only when alarm triggers
-- Notification API is lightweight, no performance impact
-- Alarm state persisted immediately to handle unexpected closures
-
-**Edge Cases**:
-- **Browser closed during alarm**: On next launch, show missed alarm notification
-- **Tab in background**: Alarm still triggers (browser notifications work in background)
-- **Multiple tabs open**: Use localStorage events to sync alarm state across tabs
-- **System sleep/wake**: Alarm checks on visibility change catch missed alarms
-- **Period ended while alarm active**: Clear alarm when period ends
+**Key Design Points**:
+- Uses simple `setTimeout` - no interval checking needed
+- No state persistence - reminder is lost if browser closes (intentional simplicity)
+- Browser notification provides default system sound
+- Auto-cancelled when user ends current period
+- One reminder at a time (starting new one cancels previous)
+- Zero configuration needed beyond default duration
 
 ## 6. CSV Export Format
 
