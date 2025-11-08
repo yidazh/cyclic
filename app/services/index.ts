@@ -8,3 +8,5 @@ export * from './TimerManager';
 export * from './AnalyticsEngine';
 export * from './CSVExportService';
 export * from './BreakReminderService';
+export * from './KeyboardShortcutService';
+export * from './AppInitService';

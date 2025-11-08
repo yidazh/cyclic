@@ -100,6 +100,8 @@ export class StorageService {
    * Save or update a period
    */
   async savePeriod(period: TimePeriod): Promise<void> {
+    this.ensureInitialized();
+
     const sql = `
       INSERT INTO periods (
         id, startTime, endTime, theme, category, name, notes, tags,
@@ -117,45 +119,59 @@ export class StorageService {
         updatedAt = excluded.updatedAt
     `;
 
-    this.db.exec({
-      sql,
-      bind: [
-        period.id,
-        period.startTime,
-        period.endTime,
-        period.theme,
-        period.category,
-        period.name,
-        period.notes,
-        JSON.stringify(period.tags),
-        period.isPaused ? 1 : 0,
-        period.resumeFromPeriodId,
-        period.createdAt,
-        period.updatedAt
-      ]
-    });
+    try {
+      this.db.exec({
+        sql,
+        bind: [
+          period.id,
+          period.startTime,
+          period.endTime,
+          period.theme,
+          period.category,
+          period.name,
+          period.notes,
+          JSON.stringify(period.tags),
+          period.isPaused ? 1 : 0,
+          period.resumeFromPeriodId,
+          period.createdAt,
+          period.updatedAt
+        ]
+      });
+    } catch (error) {
+      console.error('Failed to save period:', error);
+      throw new Error(`Failed to save period: ${error}`);
+    }
   }
 
   /**
    * Get a single period by ID
    */
   async getPeriod(id: string): Promise<TimePeriod | null> {
-    const result = this.db.exec({
-      sql: 'SELECT * FROM periods WHERE id = ?',
-      bind: [id],
-      returnValue: 'resultRows',
-      rowMode: 'object'
-    });
+    this.ensureInitialized();
 
-    if (result.length === 0) return null;
+    try {
+      const result = this.db.exec({
+        sql: 'SELECT * FROM periods WHERE id = ?',
+        bind: [id],
+        returnValue: 'resultRows',
+        rowMode: 'object'
+      });
 
-    return this.rowToPeriod(result[0]);
+      if (result.length === 0) return null;
+
+      return this.rowToPeriod(result[0]);
+    } catch (error) {
+      console.error('Failed to get period:', error);
+      throw new Error(`Failed to get period: ${error}`);
+    }
   }
 
   /**
    * Get periods with optional filtering
    */
   async getPeriods(filter?: PeriodFilter): Promise<TimePeriod[]> {
+    this.ensureInitialized();
+
     let sql = 'SELECT * FROM periods WHERE 1=1';
     const params: any[] = [];
 
@@ -186,74 +202,109 @@ export class StorageService {
 
     sql += ' ORDER BY startTime DESC';
 
-    const rows = this.db.exec({
-      sql,
-      bind: params,
-      returnValue: 'resultRows',
-      rowMode: 'object'
-    });
+    try {
+      const rows = this.db.exec({
+        sql,
+        bind: params,
+        returnValue: 'resultRows',
+        rowMode: 'object'
+      });
 
-    return rows.map((row: any) => this.rowToPeriod(row));
+      return rows.map((row: any) => this.rowToPeriod(row));
+    } catch (error) {
+      console.error('Failed to get periods:', error);
+      return [];
+    }
   }
 
   /**
    * Get the active period (endTime is null)
    */
   async getActivePeriod(): Promise<TimePeriod | null> {
-    const result = this.db.exec({
-      sql: 'SELECT * FROM periods WHERE endTime IS NULL ORDER BY startTime DESC LIMIT 1',
-      returnValue: 'resultRows',
-      rowMode: 'object'
-    });
+    this.ensureInitialized();
 
-    if (result.length === 0) return null;
+    try {
+      const result = this.db.exec({
+        sql: 'SELECT * FROM periods WHERE endTime IS NULL ORDER BY startTime DESC LIMIT 1',
+        returnValue: 'resultRows',
+        rowMode: 'object'
+      });
 
-    return this.rowToPeriod(result[0]);
+      if (result.length === 0) return null;
+
+      return this.rowToPeriod(result[0]);
+    } catch (error) {
+      console.error('Failed to get active period:', error);
+      return null;
+    }
   }
 
   /**
    * Delete a period
    */
   async deletePeriod(id: string): Promise<void> {
-    this.db.exec({
-      sql: 'DELETE FROM periods WHERE id = ?',
-      bind: [id]
-    });
+    this.ensureInitialized();
+
+    try {
+      this.db.exec({
+        sql: 'DELETE FROM periods WHERE id = ?',
+        bind: [id]
+      });
+    } catch (error) {
+      console.error('Failed to delete period:', error);
+      throw new Error(`Failed to delete period: ${error}`);
+    }
   }
 
   /**
    * Get configuration value
    */
   async getConfig(key: string): Promise<any> {
-    const result = this.db.exec({
-      sql: 'SELECT value FROM config WHERE key = ?',
-      bind: [key],
-      returnValue: 'resultRows',
-      rowMode: 'object'
-    });
+    this.ensureInitialized();
 
-    if (result.length === 0) return null;
+    try {
+      const result = this.db.exec({
+        sql: 'SELECT value FROM config WHERE key = ?',
+        bind: [key],
+        returnValue: 'resultRows',
+        rowMode: 'object'
+      });
 
-    return JSON.parse(result[0].value);
+      if (result.length === 0) return null;
+
+      return JSON.parse(result[0].value);
+    } catch (error) {
+      console.error('Failed to get config:', error);
+      return null;
+    }
   }
 
   /**
    * Save configuration value
    */
   async saveConfig(key: string, value: any): Promise<void> {
-    this.db.exec({
-      sql: `
-        INSERT INTO config (key, value) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-      `,
-      bind: [key, JSON.stringify(value)]
-    });
+    this.ensureInitialized();
+
+    try {
+      this.db.exec({
+        sql: `
+          INSERT INTO config (key, value) VALUES (?, ?)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `,
+        bind: [key, JSON.stringify(value)]
+      });
+    } catch (error) {
+      console.error('Failed to save config:', error);
+      throw new Error(`Failed to save config: ${error}`);
+    }
   }
 
   /**
    * Execute transaction
    */
   async transaction<T>(callback: () => Promise<T>): Promise<T> {
+    this.ensureInitialized();
+
     this.db.exec('BEGIN TRANSACTION');
 
     try {
@@ -262,7 +313,17 @@ export class StorageService {
       return result;
     } catch (error) {
       this.db.exec('ROLLBACK');
+      console.error('Transaction failed:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Ensure database is initialized
+   */
+  private ensureInitialized(): void {
+    if (!this.initialized || !this.db) {
+      throw new Error('Storage service not initialized. Call init() first.');
     }
   }
 

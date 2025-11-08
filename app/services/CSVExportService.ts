@@ -101,15 +101,42 @@ export class CSVExportService {
   /**
    * Download CSV file
    */
-  downloadCSV(blob: Blob, filename: string = 'time-tracking-export.csv'): void {
+  downloadCSV(blob: Blob, filename?: string): void {
+    const finalFilename = filename || this.generateFilename();
+
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = filename;
+    link.download = finalFilename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Generate filename with current date
+   */
+  private generateFilename(): string {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+
+    return `time-tracking-${year}-${month}-${day}.csv`;
+  }
+
+  /**
+   * Export and download in one step
+   */
+  async exportAndDownload(dateRange?: DateRange, filename?: string): Promise<void> {
+    try {
+      const blob = await this.exportCSV(dateRange);
+      this.downloadCSV(blob, filename);
+    } catch (error) {
+      console.error('Failed to export CSV:', error);
+      throw new Error('Failed to export CSV');
+    }
   }
 }
 
