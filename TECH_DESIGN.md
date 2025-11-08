@@ -4,26 +4,35 @@
 
 ### 1.1 Technology Stack
 
-**Frontend Framework**: React (recommended) or Vue.js
+**Language**: TypeScript
+- Type safety for better code quality
+- Enhanced IDE support and autocomplete
+- Catch errors at compile time
+- Better documentation through types
+- Improved refactoring capabilities
+
+**Frontend Framework**: React
 - Component-based architecture
 - Virtual DOM for efficient updates
 - Rich ecosystem and tooling
 - Excellent for single-page applications
+- Hooks for clean state management
 
-**Alternative**: Vanilla JavaScript with Web Components
-- No framework dependencies
-- Smaller bundle size
-- More control over implementation
+**Full-Stack Framework**: TanStack Start
+- Built on top of TanStack Router
+- File-based routing
+- Type-safe routing and data loading
+- SSR and static generation support (though we'll use client-only)
+- Integrated with modern React patterns
+- Great developer experience
 
-**Build Tool**: Vite
-- Fast development server
-- Optimized production builds
-- Modern ES modules support
-
-**Styling**: CSS Modules or Tailwind CSS
-- Scoped styling
-- Utility-first approach
-- Responsive design support
+**Styling**: Tailwind CSS
+- Utility-first CSS framework
+- Rapid UI development
+- Consistent design system
+- Small bundle size with purging
+- Responsive design utilities
+- Dark mode support built-in
 
 **Storage**: SQLite Wasm (@sqlite.org/sqlite-wasm)
 - Full SQL database running in browser via WebAssembly
@@ -34,9 +43,13 @@
 - File-based persistence using OPFS (Origin Private File System)
 - Mature ecosystem and tooling
 
-**State Management**: Context API (React) or Pinia (Vue)
-- No external dependencies needed for React Context
-- Sufficient for client-only app
+**State Management**: Zustand
+- Lightweight and minimal boilerplate
+- Simple API based on hooks
+- No providers needed
+- TypeScript-first design
+- Excellent performance with selective subscriptions
+- DevTools support
 
 ### 1.2 Architecture Pattern
 
@@ -51,12 +64,13 @@
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
-│         State Management Layer          │
+│    State Management Layer (Zustand)    │
 │  - Active Period State                  │
 │  - Pause State (isPaused, resumeData)   │
 │  - Period History State                 │
 │  - Configuration State                  │
 │  - UI State                             │
+│  - Break Reminder State                 │
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
@@ -65,6 +79,7 @@
 │  - Timer Manager                        │
 │  - Analytics Engine                     │
 │  - CSV Export Service                   │
+│  - Break Reminder Service               │
 └─────────────────┬───────────────────────┘
                   │
 ┌─────────────────▼───────────────────────┐
@@ -73,6 +88,91 @@
 │  - SQL Query Builder                    │
 │  - Data Validation                      │
 └─────────────────────────────────────────┘
+```
+
+### 1.3 Zustand Store Structure
+
+**Main Store** (`stores/useStore.ts`):
+```typescript
+import { create } from 'zustand';
+import { devtools } from 'zustand/middleware';
+
+interface AppStore {
+  // Active Period State
+  activePeriod: TimePeriod | null;
+  setActivePeriod: (period: TimePeriod | null) => void;
+
+  // Period History
+  periods: TimePeriod[];
+  setPeriods: (periods: TimePeriod[]) => void;
+  addPeriod: (period: TimePeriod) => void;
+  updatePeriod: (id: string, updates: Partial<TimePeriod>) => void;
+
+  // Pause State
+  isPaused: boolean;
+  setIsPaused: (paused: boolean) => void;
+
+  // Configuration
+  config: AppConfig;
+  updateConfig: (updates: Partial<AppConfig>) => void;
+
+  // Break Reminder
+  reminderActive: boolean;
+  setReminderActive: (active: boolean) => void;
+
+  // UI State
+  currentView: 'current' | 'history' | 'analytics' | 'timeline' | 'settings';
+  setCurrentView: (view: AppStore['currentView']) => void;
+}
+
+export const useStore = create<AppStore>()(
+  devtools(
+    (set) => ({
+      // Initial state
+      activePeriod: null,
+      periods: [],
+      isPaused: false,
+      config: defaultConfig,
+      reminderActive: false,
+      currentView: 'current',
+
+      // Actions
+      setActivePeriod: (period) => set({ activePeriod: period }),
+      setPeriods: (periods) => set({ periods }),
+      addPeriod: (period) => set((state) => ({
+        periods: [period, ...state.periods]
+      })),
+      updatePeriod: (id, updates) => set((state) => ({
+        periods: state.periods.map(p =>
+          p.id === id ? { ...p, ...updates } : p
+        )
+      })),
+      setIsPaused: (paused) => set({ isPaused: paused }),
+      updateConfig: (updates) => set((state) => ({
+        config: { ...state.config, ...updates }
+      })),
+      setReminderActive: (active) => set({ reminderActive: active }),
+      setCurrentView: (view) => set({ currentView: view }),
+    }),
+    { name: 'TimeTrackingStore' }
+  )
+);
+```
+
+**Selective Subscriptions**:
+```typescript
+// Only subscribe to active period
+const activePeriod = useStore((state) => state.activePeriod);
+
+// Only subscribe to config
+const config = useStore((state) => state.config);
+
+// Multiple selections with shallow equality
+import { shallow } from 'zustand/shallow';
+const { isPaused, reminderActive } = useStore(
+  (state) => ({ isPaused: state.isPaused, reminderActive: state.reminderActive }),
+  shallow
+);
 ```
 
 ## 2. Data Models
@@ -388,7 +488,37 @@ class BreakReminderService {
 
 ## 4. UI Components
 
-### 4.1 Component Hierarchy (React Example)
+### 4.1 Routing Structure (TanStack Start)
+
+**File-based Routes** (`app/routes/`):
+```
+routes/
+├── __root.tsx              # Root layout with global providers
+├── index.tsx               # Main app (CurrentPeriodView)
+├── history.tsx             # History view
+├── analytics.tsx           # Analytics view
+├── timeline.tsx            # Timeline view
+└── settings.tsx            # Settings view
+```
+
+**Root Layout** (`routes/__root.tsx`):
+```typescript
+import { createRootRoute, Outlet } from '@tanstack/react-router';
+import { Header } from '../components/Header';
+
+export const Route = createRootRoute({
+  component: () => (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <Header />
+      <main className="container mx-auto px-4 py-6">
+        <Outlet />
+      </main>
+    </div>
+  ),
+});
+```
+
+### 4.2 Component Hierarchy (React + TypeScript)
 
 ```
 App
@@ -1274,24 +1404,41 @@ try {
 
 ## 9. Deployment
 
-### 9.1 Build Process
+### 9.1 Build Process (TanStack Start)
 ```bash
-# Development
+# Development with hot reload
 npm run dev
 
-# Production build
-npm run build
-# Output: dist/ folder with optimized static files
+# Type checking
+npm run typecheck
 
-# Preview production build
-npm run preview
+# Production build (static export for client-only app)
+npm run build
+# Output: .output/public/ folder with optimized static files
+
+# Preview production build locally
+npm run start
+```
+
+**Build Configuration** (`app.config.ts`):
+```typescript
+import { defineConfig } from '@tanstack/start/config';
+
+export default defineConfig({
+  // Client-only mode (no SSR)
+  server: {
+    preset: 'static'
+  },
+  // Enable TypeScript
+  typescript: true,
+});
 ```
 
 ### 9.2 Hosting Options (Static Hosting)
-- **GitHub Pages**: Free, easy deployment from repo
+- **Vercel**: Recommended, excellent support for TanStack projects
 - **Netlify**: Free tier, automatic deploys, custom domains
-- **Vercel**: Free tier, excellent performance
-- **Cloudflare Pages**: Free, global CDN
+- **Cloudflare Pages**: Free, global CDN, great performance
+- **GitHub Pages**: Free, easy deployment from repo
 
 ### 9.3 Progressive Web App (PWA)
 - Add service worker for offline support
@@ -1308,8 +1455,10 @@ npm run preview
 
 ### 10.2 XSS Prevention
 - Sanitize user input (notes, names)
-- Use framework's built-in escaping (React, Vue)
-- Avoid dangerouslySetInnerHTML / v-html
+- Use React's built-in escaping (JSX automatically escapes)
+- Avoid dangerouslySetInnerHTML
+- TypeScript helps prevent type-related security issues
+- Tailwind CSS classes are static (no dynamic CSS injection)
 
 ### 10.3 Data Backup
 - Encourage regular CSV exports for backup
@@ -1336,31 +1485,45 @@ npm run preview
 
 ## 12. Development Milestones
 
-### Phase 1: MVP (Weeks 1-2)
-- Basic UI with current period display
+### Phase 0: Setup (Week 1)
+- Initialize TanStack Start project with TypeScript
+- Configure Tailwind CSS
+- Set up Zustand store structure
+- Integrate SQLite Wasm
+- Basic routing structure
+
+### Phase 1: MVP (Weeks 2-3)
+- Basic UI with current period display (Tailwind components)
 - Period transition with spacebar
 - Pause/resume with Alt+Space
-- IndexedDB storage
-- Simple history view
+- SQLite Wasm storage implementation
+- Zustand state management integration
+- Simple history view with routing
 
-### Phase 2: Metadata (Week 3)
-- Theme/category system
-- Notes and tags
-- Metadata editing
+### Phase 2: Metadata (Week 4)
+- Theme/category system with Tailwind color schemes
+- Notes and tags input components
+- Metadata editing with TypeScript validation
+- Break reminder feature
 
-### Phase 3: Analytics & Visualization (Week 4)
-- Summary calculations
-- Basic charts
+### Phase 3: Analytics & Visualization (Week 5)
+- Summary calculations with SQL aggregations
+- Basic charts (using charting library)
 - Timeline view with infinite horizontal scrolling
 - CSV export functionality
 
-### Phase 4: Polish (Week 5)
+### Phase 4: Polish (Week 6)
 - Keyboard shortcuts
-- Settings panel
-- Responsive design
-- PWA support
+- Settings panel with theme customization
+- Responsive design (Tailwind breakpoints)
+- Dark mode support (Tailwind dark: utilities)
+- TypeScript strict mode compliance
 
-### Phase 5: Testing & Launch (Week 6)
-- Comprehensive testing
+### Phase 5: Testing & Launch (Week 7)
+- Unit tests (Vitest)
+- Integration tests
+- E2E tests (Playwright)
+- Performance optimization
+- PWA support
 - Documentation
-- Deployment
+- Deployment to Vercel
