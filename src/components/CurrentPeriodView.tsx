@@ -27,6 +27,9 @@ export function CurrentPeriodView() {
 	useEffect(() => {
 		if (!activePeriod) return;
 
+		// Immediately set current elapsed time to avoid race condition
+		setElapsed(timerManager.getElapsedTime());
+
 		const unsubscribe = timerManager.subscribe((elapsedMs) => {
 			setElapsed(elapsedMs);
 		});
