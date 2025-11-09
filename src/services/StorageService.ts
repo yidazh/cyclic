@@ -5,7 +5,8 @@ import type { PeriodFilter, TimePeriod } from "@/types";
  * Manages SQLite Wasm database connection and CRUD operations
  */
 export class StorageService {
-	private db: any = null;
+	private promiser: any = null;
+	private dbId: string = "";
 	private initialized = false;
 
 	/**
@@ -16,24 +17,39 @@ export class StorageService {
 		if (this.initialized) return;
 
 		try {
-			// Import SQLite Wasm
-			const sqlite3InitModule = (await import("@sqlite.org/sqlite-wasm"))
-				.default;
+			console.log("Loading and initializing SQLite3 module...");
 
-			const sqlite3 = await sqlite3InitModule({
-				print: console.log,
-				printErr: console.error,
+			// Dynamic import to avoid SSR issues
+			const { sqlite3Worker1Promiser } = await import(
+				"@sqlite.org/sqlite-wasm"
+			);
+
+			// Initialize SQLite worker with promiser
+			this.promiser = await new Promise((resolve) => {
+				const _promiser = sqlite3Worker1Promiser({
+					onready: () => resolve(_promiser),
+				});
 			});
 
-			// Create or open database in OPFS (Origin Private File System)
-			if ("opfs" in sqlite3) {
-				this.db = new sqlite3.oo1.OpfsDb("/timetracking.db");
-				console.log("Using OPFS for persistence");
-			} else {
-				// Fallback to in-memory database (data lost on reload)
-				this.db = new sqlite3.oo1.DB();
-				console.warn("OPFS not available, using in-memory database");
-			}
+			console.log("Done initializing. Running demo...");
+
+			// Get SQLite version info
+			const configResponse = await this.promiser("config-get", {});
+			console.log(
+				"Running SQLite3 version",
+				configResponse.result.version.libVersion,
+			);
+
+			// Open database with OPFS for persistence
+			const openResponse = await this.promiser("open", {
+				filename: "file:timetracking.db?vfs=opfs",
+			});
+
+			this.dbId = openResponse.dbId;
+			console.log(
+				"OPFS is available, created persisted database at",
+				openResponse.result.filename.replace(/^file:(.*?)\?vfs=opfs$/, "$1"),
+			);
 
 			// Initialize schema
 			await this.initSchema();
@@ -49,12 +65,13 @@ export class StorageService {
 	 */
 	private async initSchema(): Promise<void> {
 		// Check if schema exists
-		const tableExists = this.db.exec({
+		const result = await this.promiser("exec", {
+			dbId: this.dbId,
 			sql: "SELECT name FROM sqlite_master WHERE type='table' AND name='metadata'",
 			returnValue: "resultRows",
 		});
 
-		if (tableExists.length === 0) {
+		if (result.result.resultRows.length === 0) {
 			// Create schema
 			const schema = `
         CREATE TABLE periods (
@@ -92,7 +109,10 @@ export class StorageService {
         INSERT INTO metadata (key, value) VALUES ('schema_version', '1');
       `;
 
-			this.db.exec(schema);
+			await this.promiser("exec", {
+				dbId: this.dbId,
+				sql: schema,
+			});
 			console.log("Database schema initialized");
 		}
 	}
@@ -121,7 +141,8 @@ export class StorageService {
     `;
 
 		try {
-			this.db.exec({
+			await this.promiser("exec", {
+				dbId: this.dbId,
 				sql,
 				bind: [
 					period.id,
@@ -151,16 +172,17 @@ export class StorageService {
 		this.ensureInitialized();
 
 		try {
-			const result = this.db.exec({
+			const result = await this.promiser("exec", {
+				dbId: this.dbId,
 				sql: "SELECT * FROM periods WHERE id = ?",
 				bind: [id],
 				returnValue: "resultRows",
 				rowMode: "object",
 			});
 
-			if (result.length === 0) return null;
+			if (result.result.resultRows.length === 0) return null;
 
-			return this.rowToPeriod(result[0]);
+			return this.rowToPeriod(result.result.resultRows[0]);
 		} catch (error) {
 			console.error("Failed to get period:", error);
 			throw new Error(`Failed to get period: ${error}`);
@@ -204,14 +226,15 @@ export class StorageService {
 		sql += " ORDER BY startTime DESC";
 
 		try {
-			const rows = this.db.exec({
+			const result = await this.promiser("exec", {
+				dbId: this.dbId,
 				sql,
 				bind: params,
 				returnValue: "resultRows",
 				rowMode: "object",
 			});
 
-			return rows.map((row: any) => this.rowToPeriod(row));
+			return result.result.resultRows.map((row: any) => this.rowToPeriod(row));
 		} catch (error) {
 			console.error("Failed to get periods:", error);
 			return [];
@@ -225,15 +248,16 @@ export class StorageService {
 		this.ensureInitialized();
 
 		try {
-			const result = this.db.exec({
+			const result = await this.promiser("exec", {
+				dbId: this.dbId,
 				sql: "SELECT * FROM periods WHERE endTime IS NULL ORDER BY startTime DESC LIMIT 1",
 				returnValue: "resultRows",
 				rowMode: "object",
 			});
 
-			if (result.length === 0) return null;
+			if (result.result.resultRows.length === 0) return null;
 
-			return this.rowToPeriod(result[0]);
+			return this.rowToPeriod(result.result.resultRows[0]);
 		} catch (error) {
 			console.error("Failed to get active period:", error);
 			return null;
@@ -247,7 +271,8 @@ export class StorageService {
 		this.ensureInitialized();
 
 		try {
-			this.db.exec({
+			await this.promiser("exec", {
+				dbId: this.dbId,
 				sql: "DELETE FROM periods WHERE id = ?",
 				bind: [id],
 			});
@@ -264,16 +289,17 @@ export class StorageService {
 		this.ensureInitialized();
 
 		try {
-			const result = this.db.exec({
+			const result = await this.promiser("exec", {
+				dbId: this.dbId,
 				sql: "SELECT value FROM config WHERE key = ?",
 				bind: [key],
 				returnValue: "resultRows",
 				rowMode: "object",
 			});
 
-			if (result.length === 0) return null;
+			if (result.result.resultRows.length === 0) return null;
 
-			return JSON.parse(result[0].value);
+			return JSON.parse(result.result.resultRows[0].value);
 		} catch (error) {
 			console.error("Failed to get config:", error);
 			return null;
@@ -287,7 +313,8 @@ export class StorageService {
 		this.ensureInitialized();
 
 		try {
-			this.db.exec({
+			await this.promiser("exec", {
+				dbId: this.dbId,
 				sql: `
           INSERT INTO config (key, value) VALUES (?, ?)
           ON CONFLICT(key) DO UPDATE SET value = excluded.value
@@ -306,14 +333,23 @@ export class StorageService {
 	async transaction<T>(callback: () => Promise<T>): Promise<T> {
 		this.ensureInitialized();
 
-		this.db.exec("BEGIN TRANSACTION");
+		await this.promiser("exec", {
+			dbId: this.dbId,
+			sql: "BEGIN TRANSACTION",
+		});
 
 		try {
 			const result = await callback();
-			this.db.exec("COMMIT");
+			await this.promiser("exec", {
+				dbId: this.dbId,
+				sql: "COMMIT",
+			});
 			return result;
 		} catch (error) {
-			this.db.exec("ROLLBACK");
+			await this.promiser("exec", {
+				dbId: this.dbId,
+				sql: "ROLLBACK",
+			});
 			console.error("Transaction failed:", error);
 			throw error;
 		}
@@ -323,7 +359,7 @@ export class StorageService {
 	 * Ensure database is initialized
 	 */
 	private ensureInitialized(): void {
-		if (!this.initialized || !this.db) {
+		if (!this.initialized || !this.promiser) {
 			throw new Error("Storage service not initialized. Call init() first.");
 		}
 	}
