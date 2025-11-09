@@ -18,6 +18,7 @@ dist
 .vinxi
 .vercel
 .netlify
+.nitro
 
 # Environment
 .env
@@ -48,3 +49,6 @@ coverage
 .temp
 .cache
 app.config.timestamp_*.js
+
+# Generated files
+**/routeTree.gen.ts
